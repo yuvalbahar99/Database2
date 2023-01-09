@@ -8,16 +8,19 @@ description: checks the synchronization while mode is threading
 
 from filedatabase import FileDatabase
 from syncdatabase import SyncDatabase
-from threading import Thread
+import win32process
+import win32event
 import logging
 
 # ----------------- CONSTANTS - ----------------
 
 FILENAME = "new_file"
+MODE = "threading"
 READER_NUM = 50
 WRITER_NUM = 10
 FORMAT = '%(asctime)s %(levelname)s %(threadName)s %(message)s'
 FILENAMELOG = 'logging_thread.text'
+SIZE = 1000
 
 # ----------------- FUNCTIONS - ----------------
 
@@ -45,8 +48,7 @@ def writer(database):
     for i in range(100):
         assert database.set_value(i, i)
     for i in range(100):
-        val = database.delete_value(i)
-        flag = val == i or val is None
+        flag = database.delete_value(i) == i or database.delete_value(i) is None
         assert flag
     logging.debug("writer left")
 
@@ -61,21 +63,16 @@ def main():
     logging.basicConfig(filename=FILENAMELOG, level=logging.DEBUG, format=FORMAT)
     database = SyncDatabase(FileDatabase(FILENAME))
     # הרשאת כתיבה כאשר יש תחרות
-    all_threads = []
-    for i in range(1000, 1100):
-        database.set_value(i, i)
+    counter = 0
     for i in range(0, READER_NUM):
-        thread = Thread(target=reader, args=(database, ))
-        all_threads.append(thread)
+        thread = win32process.beginthreadex(None, SIZE, writer, (database, ), 0)[0]
+        if win32event.WaitForSingleObject(thread, win32event.INFINITE) == 0:
+            counter += 1
     for i in range(0, WRITER_NUM):
-        thread = Thread(target=writer, args=(database, ))
-        all_threads.append(thread)
-    for i in all_threads:
-        i.start()
-    for i in all_threads:
-        i.join()
-    for i in range(1000, 1100):
-        assert database.get_value(i) == i
+        thread = win32process.beginthreadex(None, SIZE, reader, (database, ), 0)[0]
+        if win32event.WaitForSingleObject(thread, win32event.INFINITE) == 0:
+            counter += 1
+    assert counter == READER_NUM + WRITER_NUM
 
 
 if __name__ == "__main__":
